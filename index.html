@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<!--[if lt IE 7 ]><html class="ie ie6" lang="en"> <![endif]-->
+<!--[if IE 7 ]><html class="ie ie7" lang="en"> <![endif]-->
+<!--[if IE 8 ]><html class="ie ie8" lang="en"> <![endif]-->
+<!--[if (gte IE 9)|!(IE)]><!-->
+<html lang="en">
+<!--<![endif]-->
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <!--[if IE]>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+        <![endif]-->
+    <title> Hack cambridge UI </title>
+    <link href='http://fonts.googleapis.com/css?family=Open+Sans' rel='stylesheet' type='text/css'>
+    <!--PUT YOUR FAVICON HERE-->
+    <!--REQUIRED STYLE SHEETS-->
+    <!--MAIN BOOTSTRAP STYLE-->
+    <link href="assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet" />
+    <!--FONT AWESOME STYLE -->
+    <link href="assets/plugins/font-awesome/font-awesome.min.css" rel="stylesheet" />
+    <!--VEGAS IMAGE STYLE -->
+    <link href="assets/plugins/vegas/jquery.vegas.min.css" rel="stylesheet" />
+    <!--COUNTDOWN STYLE -->
+    <link href="assets/css/countdown.css" rel="stylesheet" />
+    <!--CUSTOM STYLE -->
+    <link href="assets/css/style.css" rel="stylesheet" />
+    <!--END REQUIRED STYLE SHEETS-->
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+      <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+        <style type='text/css'>
+            .audioElem {
+                z-index:1000;
+                position:absolute;
+                top:0px;left:0px;
+            }   
+        </style>
+        <script type="text/javascript" src="lib/processing-0.9.0.js"></script>
+        <script type="text/javascript" src="lib/CubicVR.min.js"></script>
+        <script type="text/javascript" src="lib/beatdetektor.js"></script>
+        <script type="text/javascript" src="lib/fft.js"></script>
+        <script type="text/javascript">
+            //--------------------------------beggin of html->js->uno------------------------------------
+            var offset,bpm;
+            //$("#offset").text(offset);
+            //$('#bpm').text(bpm);
+
+            var audio = {
+                element: null,
+                bufferSize: 0,
+                signal: null,
+                channels: 0,
+                rate: 0,
+                fft: null,
+                bd: null,
+                kick_det: null,
+                vu: null,
+            };
+
+            var m_BeatTimer = 0;
+            var m_BeatCounter = 0;
+            var clearClr = [0, 0, 1];
+
+            var timerMilliseconds;
+            var timerSeconds = 0;
+            var timerLastSeconds = 0;
+
+            var pjsTex, nmapTex;
+
+            function audioWritten(event) {
+                if (audio.fft == null) return;
+
+                var fb = event.frameBuffer;
+
+                for (var i = 0, fbl = audio.bufferSize; i < fbl; i++) {
+                    // Assuming interlaced stereo channels,
+                    // need to split and merge into a stero-mix mono signal
+                    audio.signal[i] = (fb[2 * i] + fb[2 * i + 1]) / 2;
+                }
+
+                audio.fft.forward(audio.signal);
+
+                timestamp = event.time;
+
+                audio.bd.process(timestamp, audio.fft.spectrum);
+
+/*
+                offset = audio.bd.bpm_offset;
+                console.log("!!!!!!!!ave_offset:"+offset);
+                bpm = audio.bd.win_bpm_int;
+                console.log("!!!!!!!!bpm:"+bpm);
+*/
+
+                if (audio.bd.win_bpm_int_lo) {
+                    m_BeatTimer += audio.bd.last_update;
+
+                    if (m_BeatTimer > (60.0 / audio.bd.win_bpm_int_lo)) {
+                        m_BeatTimer -= (60.0 / audio.bd.win_bpm_int_lo);
+                        clearClr[0] = 0.5 + Math.random() / 2;
+                        clearClr[1] = 0.5 + Math.random() / 2;
+                        clearClr[2] = 0.5 + Math.random() / 2;
+                        m_BeatCounter++;
+                    }
+                }
+
+                audio.vu.process(audio.bd, timestamp);
+            }
+
+
+            var audioContext;
+            var audioData;
+            var audioSource;
+
+            function loadedMetadata() {
+                audio.element = document.getElementById('audio1');
+
+                  if (audioSource) {
+                    audioSource.disconnect();
+                    audioData.disconnect();
+                  }
+                  
+                  audio.bufferSize = 1024;
+                  audio.channels = 1;
+
+                  if (!audioContext) audioContext = new AudioContext();
+                  
+                  audio.rate = audioContext.sampleRate;
+                  audioData = audioContext.createScriptProcessor(audio.bufferSize, 2, 1);
+
+                  audioData.onaudioprocess = doAudio;
+                  // refuses to let me have 0 outputs?
+
+                  
+                  audioSource = audioContext.createMediaElementSource(audio.element);
+                 
+
+                  audioSource.connect(audioData);
+                  audioData.connect(audioContext.destination);
+                  audioSource.connect(audioContext.destination);
+
+                  audio.fft = new FFT(audio.bufferSize, audio.rate);
+            }
+
+            function doAudio(event) {
+                if (!audio.fft || audio.element.paused) {
+                    return;
+                }
+
+                var signalLeft = event.inputBuffer.getChannelData(0);
+                var signalRight = event.inputBuffer.getChannelData(1);
+
+                if (!audio.signal) {
+                    audio.signal = new Float32Array(signalLeft.length);
+                }
+                for (var i = 0, fbl = audio.bufferSize; i < fbl; i++) {
+                    audio.signal[i] = signalLeft[i] + signalRight[i] / 2;
+                }
+
+                audio.fft.forward(audio.signal);
+                audio.bd.process(audioContext.currentTime, audio.fft.spectrum);
+
+                offset = audio.bd.bpm_offset;
+                console.log("????????ave_offset:"+offset);
+                bpm = audio.bd.win_bpm_int/10.0;
+                console.log("????????bpm:"+bpm);
+
+                if (audio.bd.win_bpm_int_lo) {
+                    m_BeatTimer += audio.bd.last_update;
+
+                    if (m_BeatTimer > (60.0 / audio.bd.win_bpm_int_lo)) {
+                        m_BeatTimer -= (60.0 / audio.bd.win_bpm_int_lo);
+                        clearClr[0] = 0.5 + Math.random() / 2;
+                        clearClr[1] = 0.5 + Math.random() / 2;
+                        clearClr[2] = 0.5 + Math.random() / 2;
+                        m_BeatCounter++;
+                    }
+                }
+
+                audio.vu.process(audio.bd, event.timeStamp / 1000);
+            }
+
+
+
+            var gl;
+            var dirLight;
+            var landscape;
+            var scene;
+            var pjsLandscapeMaterial;
+            var pjsLandscapeTexture;
+            var pjsCubeTexture;
+            var pjsCubeMaterial;
+            var pjsTextureRender;
+
+            var NUM_CUBES = 64;
+            var sceneObjects = new Array(NUM_CUBES);
+            var envTex;
+
+            function webGLStart() {
+                gl = CubicVR.init();
+
+                if (!gl) {
+                    alert("Could not initialise WebGL, sorry :-(");
+                    return;
+                }
+
+                audio.bd = new BeatDetektor();
+
+                audio.kick_det = new BeatDetektor.modules.vis.BassKick();
+                audio.vu = new BeatDetektor.modules.vis.VU();
+                canvas = CubicVR.getCanvas();
+
+                scene = new CubicVR.Scene();
+
+                CubicVR.addResizeable(scene);
+
+                scene.camera.position = [150, 250, - 150];
+                scene.camera.target = [0, 0, 0];
+                scene.camera.setFOV(60);
+                scene.camera.setDimensions(canvas.width, canvas.height);
+
+
+                //buildObjects();
+
+                scene.bindSceneObject(landscape);
+
+                // Create a shadowed area light, map resolution 2048
+                // designed for shadowing larger areas than spotlights can provide
+                // it represents a directional light with shadows.
+                dirLight = new CubicVR.Light({
+                    type: CubicVR.enums.light.type.AREA,
+                    intensity: 0.9,
+                    mapRes: 2048, // 4096 ? 8192 ? ;)
+                    areaCeiling: 80,
+                    distance: 50,
+                    areaFloor: -50,
+                    areaAxis: [15, 5] // specified in degrees east/west north/south
+                });
+                scene.bindLight(dirLight);
+
+                CubicVR.setGlobalAmbient([0.4, 0.4, 0.4]);
+
+
+                scene.setSkyBox(new CubicVR.SkyBox({
+                    texture: "asset/space_skybox.jpg"
+                }));
+
+
+                gl.clearColor(0.0, 0.0, 0.0, 1.0);
+
+                gl.clearDepth(1.0);
+
+                gl.enable(gl.DEPTH_TEST);
+                gl.depthFunc(gl.LEQUAL);
+
+                fx = new CubicVR.PostProcessChain(canvas.width, canvas.height, true);
+                fx.setBlurOpacity(0.5);
+                fx.setBlurIntensity(0.8);
+
+
+                var shaderHalfBloom = new CubicVR.PostProcessShader({
+                    shader_vertex: "asset/fx_general.vs",
+                    shader_fragment: "asset/bloom_6tap.fs",
+                    outputMode: CubicVR.enums.post.output.ADD,
+                    outputDivisor: 2
+                });
+
+                fx.addShader(shaderHalfBloom);
+
+                CubicVR.addResizeable(fx);
+
+                CubicVR.addResizeable({
+                    resize: setTitlePos
+                });
+
+                CubicVR.MainLoop(drawScene);
+                
+            }
+
+
+            var xp = 0;
+            var cp = Math.random() * 10000;
+            var activeTex = 0;
+            var lastTex = -1;
+
+            var camPos = [2, 2, - 2];
+            var camTarget = [0, 1, 0];
+            var camDist = 0.8;
+
+            var camFollowNode = [10, 40, 10];
+            var camNextNode = [0, 0, 0];
+            var firstRun = false;
+            var frameCounter = 0;
+            var followObj = -1;
+
+            function drawScene() {
+                if (!audio.bd.last_timer) return;
+                if (!timerMilliseconds) {
+                    timerMilliseconds = (new Date()).getTime();
+                    return;
+                }
+
+
+                frameCounter++;
+
+                var newTimerMilliseconds = (new Date()).getTime();
+
+                timerLastSeconds = (newTimerMilliseconds - timerMilliseconds) / 1000.0;
+
+                if (timerLastSeconds > (1 / 10)) timerLastSeconds = (1 / 10);
+
+                timerSeconds += timerLastSeconds;
+                timerMilliseconds = newTimerMilliseconds;
+
+                if (timerSeconds > 10 && timerSeconds < 15) document.getElementById('musicTitle').style.opacity = (5 - (timerSeconds - 10)) / 5.0;
+                if (timerSeconds > 15 && timerSeconds < 16) document.getElementById('musicTitle').style.opacity = 0;
+
+
+                if (pjsTex) pjsTex.update();
+                if (nmapTex) nmapTex.update();
+                if (pjsCubeTexture) pjsCubeTexture.update();
+                if (pjsLandscapeTexture && (frameCounter % 2 == 0)) pjsLandscapeTexture.update();
+
+                var kickNorm = (m_BeatTimer / (60.0 / audio.bd.win_bpm_int_lo));
+
+                cp += 0.1 * timerLastSeconds;
+
+                var i;
+
+                if (timerSeconds > 5.0) if ((Math.floor(timerSeconds) % 10) == 0 && (timerSeconds - Math.floor(timerSeconds) < 0.2)) {
+                    followObj = -1;
+
+                    if (Math.random() > 0.3) {
+                        for (i = 0; i < NUM_CUBES; i++) {
+                            if (CubicVR.vec3.length(CubicVR.vec3.subtract(sceneObjects[i].position, scene.camera.position)) < 23) {
+                                followObj = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (followObj == -1) {
+                    camNextNode = [(Math.cos(cp) - Math.sin(cp / 4)) * 50, 1, Math.cos(cp / 1.5) - Math.sin(cp * 2.0) * 50];
+                } else {
+                    camNextNode = sceneObjects[followObj].position;
+                }
+
+
+                var nextNodeMin = landscape.getHeightValue(camNextNode) + 3.0;
+                if (nextNodeMin > camNextNode[1]) camNextNode[1] = nextNodeMin;
+                camFollowNode = CubicVR.vec3.trackTarget(camFollowNode, camNextNode, 1.0 * timerLastSeconds, camDist);
+
+                var nodeClipY = landscape.getHeightValue(camFollowNode) + 3.0;
+
+                if (camFollowNode[1] < nodeClipY) camFollowNode[1] -= (camFollowNode[1] - nodeClipY) * timerLastSeconds * 4.0;
+
+                scene.camera.target = CubicVR.vec3.trackTarget(scene.camera.target, camFollowNode, 1.0 * timerLastSeconds, camDist);
+                var targetMin = landscape.getHeightValue(scene.camera.target) + 3.0;
+                if (scene.camera.target[1] < targetMin) scene.camera.target[1] = scene.camera.target[1];
+                scene.camera.position = CubicVR.vec3.trackTarget(scene.camera.position, scene.camera.target, timerLastSeconds, camDist); // ((kickNorm/2.0)+1.0)*
+                scene.camera.setFOV(85.0 + Math.sin(cp) * 50);
+
+
+                //if (audio.bd.win_bpm_int_lo) gl.clearColor(clearClr[0]*(1.6-kickNorm),clearClr[1]*(1.6-kickNorm),clearClr[2]*(1.6-kickNorm), 1.0);
+                gl.clearColor(clearClr[0] / 2.0, clearClr[1] / 2.0, clearClr[2] / 2.0, 1.0);
+
+                if (scene.skybox.scene_object) {
+                    scene.skybox.scene_object.obj.materials[0].color = [clearClr[0], clearClr[1], clearClr[2]];
+                }
+
+
+                var blurClip = audio.vu.vu_levels[0] * 6.0;
+                if (blurClip < 0) blurClip = 0;
+                if (blurClip > 0.75) blurClip = 0.75;
+
+                fx.setBlurIntensity(0.85 - blurClip);
+
+
+                var camClipY = landscape.getHeightValue(scene.camera.position) + 3.0;
+                if (scene.camera.position[1] < camClipY) scene.camera.position[1] -= (scene.camera.position[1] - camClipY) * timerLastSeconds * 4.0;
+                if (scene.camera.position[1] < camClipY - 1.5) scene.camera.position[1] = camClipY - 1.5;
+
+                var op = cp / 2.0;
+
+                for (var t = 0; t < NUM_CUBES; t++) {
+                    var p = t * 4;
+                    sceneObjects[t].position = [(Math.cos(0.5 * p + op) - Math.sin(0.4 * p + op / 4)) * 70, 1, Math.cos(0.2 * p + op / 1.5) - Math.sin(0.7 * p + op * 2.0) * 70];
+                    var minHeight = landscape.getHeightValue(sceneObjects[t].position) + 3.0;
+                    var objHeight = (Math.cos(0.4 * p + op) - Math.sin(0.7 * p + op * 2.0)) * 30;
+                    if (objHeight > minHeight) minHeight = objHeight;
+
+                    sceneObjects[t].position[1] = minHeight;
+                    sceneObjects[t].rotation = [p + cp * 150.0, 0, p + cp * 180.0];
+                }
+
+                scene.updateShadows();
+
+                fx.begin();
+
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                scene.render();
+
+                fx.end();
+
+                gl.clearColor(0.0, 0.0, 0.0, 1.0);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                fx.render();
+
+            }
+    
+            function buildViz(file) {
+                audio.element.pause();
+                document.body.removeChild(audio.element);
+                audio.element = document.createElement("audio");
+                audio.element.id = "audio1";
+                audio.element.controls=true;
+                audio.element.className="audioElem";
+                document.body.appendChild(audio.element);            
+            
+                audio.element.addEventListener('canplay', function () {
+                    loadedMetadata();
+                    this.play();
+                }, false);
+
+                var url = window.webkitURL||window.URL;
+                // Same-origin audio? Don't mind if I do... http://www.w3.org/TR/FileAPI/#dfn-createObjectURL
+                audio.element.src = url.createObjectURL(file);
+                audio.element.style.display = "";
+
+            }
+
+
+            function dropped(event) {
+                event.preventDefault();
+
+                var files = event.dataTransfer.files;
+
+                for (var i = 0; i < files.length; i++) {
+                    buildViz(files[i]);
+                    break;
+                }
+
+                if (audio.bd) audio.bd.reset();
+            }
+
+            function ignore(event) {
+                event.preventDefault();
+            }
+
+            document.addEventListener('dragover', ignore, false);
+            document.addEventListener('dragleave', ignore, false);
+            document.addEventListener('drop', dropped, false);
+
+
+
+            var period;
+            var beats=new array();
+            function run(event) {
+                period=60000.0/bpm*4;
+                while (beats>=0){
+                    offset-=period;
+                }
+                var i=1;
+                beats[0]=offset;
+                console.log(beats[0]);
+                while (beats[i]<60000){
+                    beats[i]=beats[i-1]+period;
+                    console.log(beats[i]);
+                }
+            }
+
+
+
+    //--------------------------------------- end of html->js->uno--------------------------------------
+
+    
+
+    //--------------------------------------- beggin of uno->js->html-----------------------------------
+
+    //--------------------------------------- end of uno->js->html-----------------------------------
+        </script>
+    </head>
+
+ <body onLoad="webGLStart();">
+    <!-- LEFT MENU SECTION -->
+    <section class="left-panel">
+        <nav class="navigatation">
+            <div class="menu-text">
+                <h3><i class="fa fa-plus-circle main-color"></i> PLUS </h3>
+            </div>
+            <a href="#home-section">HOME</a>
+            <a href="#about-section">PROFILE</a>
+            <a href="#services-section">MUSIC LIBRARY</a>
+            <a href="#subscribe-section">NEW MUSIC</a>
+            <a href="#lineup-section">LINEUP</a>
+
+        </nav>
+        <!-- ./Navigation links-->
+        <div id="social-links" class="Icon-trigger">
+            <span class="fa fa-bars"></span>
+            <a href="#" class="fa fa-facebook-square"></a>
+            <a href="#" class="fa fa-twitter-square"></a>
+            <a href="#" class="fa fa-linkedin-square"></a>
+            <a href="#" class="fa fa-google-plus-square"></a>
+        </div>
+        <!-- ./Social links-->
+        <!-- ./Social links-->
+    </section>
+    <!--END LEFT MENU SECTION -->
+    <!-- MAIN CONTAINER -->
+    <div class="container">
+        <!-- HOME SECION -->
+        <section id="home-section">
+            <div class="row">
+                <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+                    <h1>MUSIC GAME WITHOUT EYES </h1>
+                    <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+                        <div class="divider"></div>
+                        <h3 class="center">EXCITED MUSIC GAME & UNTIRED EYES</h3>
+                        <!-- ./Headings -->
+                        <div class="divider"></div>
+                        <div id="counter"></div>
+                        <div id="counter-default" class="row">
+                            <div class="col-lg-3 col-md-6 col-sm-6 col-xs-12">
+                                <div class="inner">
+                                    <div id="day-number" class="timer-number"></div>
+                                    <div class="timer-text">COMBO</div>
+                                    <div class="progress medium  active">
+                                        <div id="day-bar" class="progress-bar bk-blue"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-3 col-md-6 col-sm-6 col-xs-12">
+                                <div class="inner">
+                                    <div id="hour-number" class="timer-number"></div>
+                                    <div class="timer-text">PERFECT</div>
+                                    <div class="progress medium  active">
+                                        <div id="hour-bar" class="progress-bar bk-green"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-3 col-md-6 col-sm-6 col-xs-12">
+                                <div class="inner">
+                                    <div id="minute-number" class="timer-number"></div>
+                                    <div class="timer-text">GREAT</div>
+                                    <div class="progress medium  active">
+                                        <div id="minute-bar" class="progress-bar bk-pink"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-3 col-md-6 col-sm-6 col-xs-12">
+                                <div class="inner">
+                                    <div id="second-number" class="timer-number"></div>
+                                    <div class="timer-text">MISS</div>
+
+                                    <div class="progress medium  active">
+                                        <div id="second-bar" class="progress-bar bk-red"></div>
+                                    </div>
+
+                                </div>
+                            </div>
+                        </div>
+                        <!-- ./Counter -->
+
+
+                    </div>
+                </div>
+            </div>
+            <!--./row-->
+        </section>
+        <!-- END HOME SECION -->
+        
+
+        
+        <!-- SUBSCRIBE SECION -->
+        <section id="subscribe-section">
+            <div class="row">
+                <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12 sb-back-color">
+                    <div class="divider-two"></div>
+                    <h2 class="center">MUSIC GAME <i class="fa fa-plus-circle"></i> FREE EYES NOW</h2>
+                    <div class="divider-two margin-botom-50"></div>
+                    <!-- ./Headings -->
+                    <h3 class="col-lg-6 col-lg-offset-3 col-md-6 col-md-offset-3 col-sm-6 col-sm-offset-3 col-xs-12 center">
+                    <strong> YOU CAN ALSO CHOOSE </strong> the music you love, Drag it here and we will make it available for you.
+                    </h3>
+                    <div class="col-lg-6 col-lg-offset-3 col-md-6 col-md-offset-3 col-sm-6 col-sm-offset-3 col-xs-12 center">
+                        <p class="set-sb ">
+                            <audio id='audio1' tabindex="0"
+                             autoplay='true' src="asset/Charles_J_Cliffe-Rampant.ogg" class='audioElem' controls="true" onloadedmetadata="loadedMetadata();"
+                             style="width: 512px; height:40px; position:absolute; top:0px; left:0px"></audio>
+                            <br />
+                            <input onclick="run()" type="button" class="btn btn-success font-30" value="PLAY NOW" style=" height:80px; "/>
+                        </p>
+                        <p>
+                            <strong>More Functions</strong> are coming!
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <!--./row-->
+        </section>
+        <!-- END SUBSCRIBE SECION -->
+
+    </div>
+    <!-- END MAIN CONTAINER -->
+    <!--REQUIRED SCRIPTS FILES-->
+    <!--SCRIPTS AT END SO PAGE WILL TAKE LESS TIME TO LOAD-->
+
+    <!--REQUIRED CORE JQUERY SCRIPTS FILE-->
+    <script src="assets/plugins/jquery.min.js"></script>
+    <!--REQUIRED BOOTSTRAP SCRIPTS FILE-->
+    <script src="assets/plugins/bootstrap/bootstrap.js"></script>
+    <!--REQUIRED SCRIPT FILES FOR JQUERY COUNTDOWN-->
+    <script src="assets/plugins/countdown/jquery.countdown.js"></script>
+    <script src="assets/js/countdown.js"></script>
+    <!--REQUIRED SCRIPT FILE FOR VEGAS BACKGROUND IMAGE-->
+    <script src="assets/plugins/vegas/jquery.vegas.min.js"></script>
+    <!--REQUIRED SCRIPT FOR SCROLLING MENU LINKS-->
+    <script src="assets/plugins/jquery.easing.1.3.js"></script>
+    <!--REQUIRED CUSTOM SCRIPT FILE-->
+    <script src="assets/js/custom-image.js"></script>
+    <!--END REQUIRED SCRIPTS FILES-->
+</body>
+
+
+</html>
